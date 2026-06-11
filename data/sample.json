@@ -1,0 +1,7 @@
+{
+  "hosts": [
+    {"ip": "192.168.1.10", "os": "Windows 10", "services": ["HTTP", "SSH"], "status": "idle"},
+    {"ip": "192.168.1.20", "os": "Linux", "services": ["SSH"], "status": "idle"},
+    {"ip": "192.168.1.30", "os": "macOS", "services": ["VNC"], "status": "idle"}
+  ]
+}
