@@ -1,33 +1,140 @@
 <!doctype html>
 <html>
-  <head>
-    <title>Supervision - Réseau</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
-  </head>
-  <body class="p-4">
-    <div class="container">
-      <h2>Supervision des Hôtes</h2>
-      <table class="table table-striped">
-        <thead><tr><th>IP</th><th>OS</th><th>Services</th><th>Status</th></tr></thead>
-        <tbody>
-          {% for h in hosts %}
-          <tr>
-            <td>{{ h.ip }}</td>
-            <td>{{ h.os }}</td>
-            <td>{{ h.services }}</td>
-            <td>{{ h.status }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      <button class="btn btn-success" onclick="startMonitor()">Démarrer Monitoring</button>
-      <button class="btn btn-secondary" onclick="stopMonitor()">Arrêter</button>
-      <a class="btn btn-info" href="{{ url_for('export', fmt='json') }}">Exporter JSON</a>
-      <a class="btn btn-info" href="{{ url_for('export', fmt='csv') }}">Exporter CSV</a>
+<head>
+  <title>Supervision - Réseau CSC242</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body { background: #0f0f1a; color: #e0e0e0; }
+    h2, h4 { color: #4fc3f7; }
+    .table { color: #e0e0e0; }
+    .table thead { background: #1a237e; color: white; }
+    .table tbody tr:hover { background: #1e1e2e; }
+    .badge-critique { background: #c62828; color: white; padding: 4px 10px; border-radius: 5px; font-weight: bold; }
+    .badge-warning  { background: #f9a825; color: black; padding: 4px 10px; border-radius: 5px; font-weight: bold; }
+    .badge-ok       { background: #2e7d32; color: white; padding: 4px 10px; border-radius: 5px; font-weight: bold; }
+    .stat-card { background: #1a1a2e; border: 1px solid #333; border-radius: 8px; padding: 12px; text-align: center; }
+    .stat-val { font-size: 28px; font-weight: bold; color: #4fc3f7; }
+    .alerte-row { background: #2c0a0a; border-left: 4px solid #c62828; padding: 10px; margin-bottom: 8px; border-radius: 4px; }
+    .btn-custom { margin: 4px; }
+    #statut { color: #fdd835; font-weight: bold; margin-top: 10px; }
+  </style>
+</head>
+<body class="p-4">
+<div class="container-fluid">
+
+  <h2 class="mb-3">🖧 Supervision et Monitoring du Réseau — CSC242</h2>
+
+  <!-- Boutons -->
+  <div class="mb-3">
+    <button class="btn btn-success btn-custom" onclick="startMonitor()">▶ Démarrer Monitoring</button>
+    <button class="btn btn-secondary btn-custom" onclick="stopMonitor()">⏹ Arrêter</button>
+    <button class="btn btn-warning btn-custom" onclick="importerCapture()">📂 Importer Wireshark</button>
+    <a class="btn btn-info btn-custom" href="{{ url_for('export', fmt='json') }}">⬇ Exporter JSON</a>
+    <a class="btn btn-info btn-custom" href="{{ url_for('export', fmt='csv') }}">⬇ Exporter CSV</a>
+    <a class="btn btn-primary btn-custom" href="{{ url_for('index') }}">🏠 Accueil</a>
+  </div>
+  <div id="statut"></div>
+
+  <!-- Statistiques KPI -->
+  <h4 class="mt-4">📊 Statistiques par protocole</h4>
+  <div class="row mb-4">
+    {% for proto, total in stats %}
+    <div class="col-md-2 mb-2">
+      <div class="stat-card">
+        <div class="stat-val">{{ total }}</div>
+        <div>{{ proto }}</div>
+      </div>
     </div>
-    <script>
-      function startMonitor(){ fetch('/start_monitoring', {method:'POST'}).then(()=>location.reload())}
-      function stopMonitor(){ fetch('/stop_monitoring', {method:'POST'}).then(()=>location.reload())}
-    </script>
-  </body>
+    {% endfor %}
+    {% if not stats %}
+    <div class="col-12 text-warning">Aucune donnée — cliquez sur "Importer Wireshark"</div>
+    {% endif %}
+  </div>
+
+  <!-- Alertes -->
+  <h4 class="mt-2">🚨 Alertes détectées</h4>
+  {% if alertes %}
+    {% for alerte in alertes %}
+    <div class="alerte-row">
+      <span class="badge-critique">{{ alerte[3] }}</span>
+      &nbsp; <strong>{{ alerte[0] }}</strong> — Source : {{ alerte[1] }}
+      <br><small>{{ alerte[2] }}</small>
+    </div>
+    {% endfor %}
+  {% else %}
+    <div class="mb-3" style="color:#66bb6a">✅ Aucune anomalie détectée</div>
+  {% endif %}
+
+  <!-- Tableau des hôtes -->
+  <h4 class="mt-4">🖥️ Hôtes du réseau</h4>
+  <table class="table table-bordered table-hover">
+    <thead>
+      <tr><th>IP</th><th>OS</th><th>Services</th><th>Statut</th></tr>
+    </thead>
+    <tbody>
+      {% for h in hosts %}
+      <tr>
+        <td>{{ h.ip }}</td>
+        <td>{{ h.os }}</td>
+        <td>{{ h.services }}</td>
+        <td>
+          {% if h.status == 'monitoring' %}
+            <span class="badge-ok">● MONITORING</span>
+          {% else %}
+            <span class="badge-warning">● IDLE</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <!-- Tableau des paquets -->
+  <h4 class="mt-4">📦 Paquets capturés</h4>
+  <div style="max-height: 350px; overflow-y: auto;">
+  <table class="table table-bordered table-sm">
+    <thead>
+      <tr><th>N°</th><th>Temps</th><th>Source</th><th>Destination</th><th>Protocole</th><th>Taille</th><th>Info</th></tr>
+    </thead>
+    <tbody id="tableau-paquets">
+      {% for p in paquets %}
+      <tr>
+        <td>{{ p[0] }}</td><td>{{ p[1] }}</td><td>{{ p[2] }}</td>
+        <td>{{ p[3] }}</td>
+        <td>
+          {% if p[4] == 'TCP' %}<span style="color:#4fc3f7">{{ p[4] }}</span>
+          {% elif p[4] == 'UDP' %}<span style="color:#81c784">{{ p[4] }}</span>
+          {% elif p[4] == 'HTTP' %}<span style="color:#ffb74d">{{ p[4] }}</span>
+          {% elif p[4] == 'ICMP' %}<span style="color:#f48fb1">{{ p[4] }}</span>
+          {% else %}{{ p[4] }}{% endif %}
+        </td>
+        <td>{{ p[5] }}</td><td>{{ p[6] }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+
+</div>
+
+<script>
+  function startMonitor(){
+    fetch('/start_monitoring', {method:'POST'})
+    .then(()=>location.reload())
+  }
+  function stopMonitor(){
+    fetch('/stop_monitoring', {method:'POST'})
+    .then(()=>location.reload())
+  }
+  function importerCapture(){
+    document.getElementById("statut").innerText = "⏳ Importation en cours..."
+    fetch('/importer', {method:'POST'})
+    .then(r=>r.json())
+    .then(data=>{
+      document.getElementById("statut").innerText = "✅ " + data.message
+      setTimeout(()=>location.reload(), 1500)
+    })
+  }
+</script>
+</body>
 </html>

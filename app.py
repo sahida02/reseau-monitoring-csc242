@@ -1,27 +1,21 @@
 from flask import Flask, render_template, jsonify, request
 import sqlite3
-import json
 from pathlib import Path
+from parser import parser_wireshark, get_stats, get_alertes, get_paquets, init_db, load_json_to_db
 
 DB = "data/network.db"
 
-def init_db():
-    Path("data").mkdir(parents=True, exist_ok=True)
+app = Flask(__name__)
+init_db()
+load_json_to_db()
+
+def get_hosts():
     conn = sqlite3.connect(DB)
     c = conn.cursor()
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS hosts (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        ip TEXT UNIQUE,
-        os TEXT,
-        services TEXT,
-        status TEXT
-    )
-    """)
-    conn.commit()
+    c.execute("SELECT id, ip, os, services, status FROM hosts")
+    rows = c.fetchall()
     conn.close()
-
-app = Flask(__name__)
+    return [{"id": r[0], "ip": r[1], "os": r[2], "services": r[3], "status": r[4]} for r in rows]
 
 @app.route("/")
 def index():
@@ -29,26 +23,30 @@ def index():
 
 @app.route("/supervision")
 def supervision():
-    conn = sqlite3.connect(DB)
-    c = conn.cursor()
-    c.execute("SELECT id, ip, os, services, status FROM hosts")
-    rows = c.fetchall()
-    conn.close()
-    hosts = [{"id": r[0], "ip": r[1], "os": r[2], "services": r[3], "status": r[4]} for r in rows]
-    return render_template("supervision.html", hosts=hosts)
+    hosts = get_hosts()
+    stats = get_stats()
+    alertes = get_alertes()
+    paquets = get_paquets()
+    return render_template("supervision.html",
+                           hosts=hosts,
+                           stats=stats,
+                           alertes=alertes,
+                           paquets=paquets)
+
+@app.route("/importer", methods=["POST"])
+def importer():
+    nb = parser_wireshark("data/capture.txt")
+    return jsonify({"message": f"{nb} paquets importés", "ok": True})
 
 @app.route("/add_host", methods=["POST"])
 def add_host():
     data = request.get_json()
-    ip = data.get("ip")
-    os = data.get("os", "Unknown")
-    services = data.get("services", "")
-    status = data.get("status", "idle")
     conn = sqlite3.connect(DB)
     c = conn.cursor()
     try:
-        c.execute("INSERT INTO hosts (ip, os, services, status) VALUES (?, ?, ?, ?)",
-                  (ip, os, services, status))
+        c.execute("INSERT INTO hosts (ip, os, services, status) VALUES (?,?,?,?)",
+                  (data.get("ip"), data.get("os", "Unknown"),
+                   data.get("services", ""), data.get("status", "idle")))
         conn.commit()
     except sqlite3.IntegrityError:
         pass
@@ -86,9 +84,7 @@ def export(fmt):
     else:
         lines = ["ip,os,services,status"]
         lines += [f"{d[0]},{d[1]},{d[2]},{d[3]}" for d in data]
-        csv = "\n".join(lines)
-        return csv, 200, {"Content-Type": "text/csv"}
+        return "\n".join(lines), 200, {"Content-Type": "text/csv"}
 
 if __name__ == "__main__":
-    init_db()
     app.run(host="0.0.0.0", port=5000, debug=True)
